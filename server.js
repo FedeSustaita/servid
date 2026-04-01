@@ -17,8 +17,8 @@ console.log("Puerto asignado:", PORT);
 const db = mysql.createPool({
   host: "localhost",
   user: "u494447907_fede",
-  password: "Pastas_25",
-  database: "u984595023_pastas",
+  password: "Fede2912$",
+  database: "u494447907_Torneos",
   waitForConnections: true,
   connectionLimit: 10
 });
@@ -31,7 +31,7 @@ app.get("/", (req, res) => {
 // TEST MYSQL
 app.get("/test-db", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT 1 AS test");
+    const [rows] = await db.query("SELECT id, nombre, titulos, foto, puntos, pj, W, WP, Def, dif, apodo, ubic, E FROM tabla");
     res.json({
       ok: true,
       mysql: rows
@@ -48,7 +48,7 @@ app.get("/test-db", async (req, res) => {
 // EJEMPLO API
 app.get("/api/productos", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM productos");
+    const [rows] = await db.query("SELECT id, nombre, titulos, foto, puntos, pj, W, WP, Def, dif, apodo, ubic, E FROM tabla");
     res.json(rows);
   } catch (error) {
     console.error(error);
