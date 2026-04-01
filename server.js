@@ -31,16 +31,15 @@ app.get("/", (req, res) => {
 // TEST MYSQL
 app.get("/test-db", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT id, nombre, titulos, foto, puntos, pj, W, WP, Def, dif, apodo, ubic, E FROM tabla");
-    res.json({
-      ok: true,
-      mysql: rows
-    });
+    const [rows] = await db.query("SELECT 1 AS test");
+    res.json({ ok: true, rows });
   } catch (error) {
-    console.error(error);
+    console.error("ERROR MYSQL:", error);
+
     res.status(500).json({
-      ok: false,
-      error: "Error conexión MySQL"
+      message: error.message,
+      code: error.code,
+      errno: error.errno
     });
   }
 });
