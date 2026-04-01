@@ -16,7 +16,7 @@ console.log("Puerto asignado:", PORT);
 // CONFIG MYSQL (AJUSTAR SI NECESARIO)
 const db = mysql.createPool({
   host: "localhost",
-  user: "u984595023_pastas",
+  user: "u494447907_fede",
   password: "Pastas_25",
   database: "u984595023_pastas",
   waitForConnections: true,
