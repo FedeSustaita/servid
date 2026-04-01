@@ -16,9 +16,9 @@ console.log("Puerto asignado:", PORT);
 // CONFIG MYSQL (AJUSTAR SI NECESARIO)
 const db = mysql.createPool({
   host: "localhost",
-  user: "u494447907_fede",
-  password: "Fede2912$",
-  database: "u494447907_Torneos",
+  user: "u494447907_pastas2",
+  password: "Pastas123456",
+  database: "u494447907_pastas2",
   waitForConnections: true,
   connectionLimit: 10
 });
@@ -57,7 +57,15 @@ app.get("/api/productos", async (req, res) => {
     });
   }
 });
-
+app.get('/configuracion', async (req,res)=>{
+    try{
+        const [rows] = await db.query("SELECT * FROM unidadmedida");
+        res.json(rows);
+    }catch(error){
+        console.error(error);
+        res.status(500).json({ error: "Error al obtener configuracion" });
+    }
+});
 // START SERVER
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
