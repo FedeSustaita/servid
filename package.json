@@ -1,5 +1,5 @@
 {
-  "name": "mi-api",
+  "name": "pastas_back",
   "version": "1.0.0",
   "type": "module",
   "main": "server.js",
@@ -7,6 +7,8 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "mysql2": "^3.19.1"
   }
 }

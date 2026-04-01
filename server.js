@@ -1,24 +1,64 @@
 import express from "express";
+import cors from "cors";
+import mysql from "mysql2/promise";
 
 const app = express();
 
-// PUERTO (Hostinger lo maneja)
+// CONFIG EXPRESS
+app.use(cors());
+app.use(express.json());
+
+// PUERTO HOSTINGER (IMPORTANTE)
 const PORT = process.env.PORT || 3000;
 
-// Endpoint raíz
+console.log("Puerto asignado:", PORT);
+
+// CONFIG MYSQL (AJUSTAR SI NECESARIO)
+const db = mysql.createPool({
+  host: "localhost",
+  user: "u984595023_pastas",
+  password: "Pastas_25",
+  database: "u984595023_pastas",
+  waitForConnections: true,
+  connectionLimit: 10
+});
+
+// TEST ROOT (sirve para verificar deploy)
 app.get("/", (req, res) => {
-  res.send("API funcionando 🚀");
+  res.send("Servidor funcionando correctamente 🚀");
 });
 
-// Endpoint de prueba
-app.get("/api/test", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Todo funciona correctamente"
-  });
+// TEST MYSQL
+app.get("/test-db", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT 1 AS test");
+    res.json({
+      ok: true,
+      mysql: rows
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      ok: false,
+      error: "Error conexión MySQL"
+    });
+  }
 });
 
-// Iniciar servidor
+// EJEMPLO API
+app.get("/api/productos", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM productos");
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      error: "Error obteniendo productos"
+    });
+  }
+});
+
+// START SERVER
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
 });
