@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import mysql from "mysql2/promise";
-
+import jwt from "jsonwebtoken";
 const app = express();
 const SECRET = process.env.JWT_SECRET || "secreto123";
 // CONFIG EXPRESS
