@@ -1926,7 +1926,60 @@ app.get('/ventas', async (req,res)=>{
 
 })
 
+
 // --------------------
+// login
+
+
+app.post('/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        // 🔴 validar datos
+        if (!username || !password) {
+            return res.status(400).json({ error: "Faltan datos" });
+        }
+
+        // 🔍 buscar usuario
+        const [rows] = await db.query(
+            `SELECT id, username, password 
+                FROM usuarios 
+                WHERE username = ?`,
+            [username]
+        );
+
+        if (rows.length === 0) {
+            return res.status(400).json({ error: "Usuario no existe" });
+        }
+
+        const user = rows[0];
+
+        // 🔐 validar password (simple, después podés usar bcrypt)
+        if (user.password !== password) {
+            return res.status(400).json({ error: "Contraseña incorrecta" });
+        }
+
+        // 🎟️ generar token
+        const token = jwt.sign(
+            { id: user.id, username: user.username },
+            SECRET,
+            { expiresIn: "8h" }
+        );
+
+        // ✅ respuesta
+        res.json({
+            message: "Login correcto",
+            token,
+            listadoId: user.id
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error en login" });
+    }
+});
+
+
 
 
 // --------------------
