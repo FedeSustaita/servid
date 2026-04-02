@@ -3,7 +3,7 @@ import cors from "cors";
 import mysql from "mysql2/promise";
 
 const app = express();
-
+const SECRET = process.env.JWT_SECRET || "secreto123";
 // CONFIG EXPRESS
 app.use(cors());
 app.use(express.json());
@@ -1974,8 +1974,8 @@ app.post('/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Error en login" });
+        console.error("ERROR LOGIN:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
