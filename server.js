@@ -23,39 +23,14 @@ const db = mysql.createPool({
   connectionLimit: 10
 });
 
-// TEST ROOT (sirve para verificar deploy)
-app.get("/", (req, res) => {
-  res.send("Servidor funcionando correctamente 🚀");
+app.get('/', (req,res)=>{
+    res.send('Hola Mundo');
 });
 
-// TEST MYSQL
-app.get("/test-db", async (req, res) => {
-  try {
-    const [rows] = await db.query("SELECT 1 AS test");
-    res.json({ ok: true, rows });
-  } catch (error) {
-    console.error("ERROR MYSQL:", error);
+// --------------------
+// CONFIGURACION
+// --------------------
 
-    res.status(500).json({
-      message: error.message,
-      code: error.code,
-      errno: error.errno
-    });
-  }
-});
-
-// EJEMPLO API
-app.get("/api/productos", async (req, res) => {
-  try {
-    const [rows] = await db.query("SELECT id, nombre, titulos, foto, puntos, pj, W, WP, Def, dif, apodo, ubic, E FROM tabla");
-    res.json(rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      error: "Error obteniendo productos"
-    });
-  }
-});
 app.get('/configuracion', async (req,res)=>{
     try{
         const [rows] = await db.query("SELECT * FROM unidadmedida");
@@ -314,11 +289,15 @@ app.post('/ingredientes', async (req,res)=>{
             return res.status(400).json({error:"Faltan datos"})
         }
 
-        costo = Number(costo)
+        costo = costo ? Number(costo) : null
         factorConversion = Number(factorConversion)
 
-        if(costo <= 0 || factorConversion <= 0){
-            return res.status(400).json({error:"Costo y factor deben ser mayores a 0"})
+        if(factorConversion <= 0){
+            return res.status(400).json({error:"Factor debe ser mayor a 0"})
+        }
+
+        if(costo != null && costo <= 0){
+            return res.status(400).json({error:"Costo debe ser mayor a 0"})
         }
 
         const [result] = await db.query(`
@@ -346,8 +325,7 @@ app.post('/ingredientes', async (req,res)=>{
     }
 })
 app.put('/ingredientes/:id', async (req, res) => {
-    try{
-
+    try {
         const { id } = req.params
 
         let {
@@ -358,18 +336,34 @@ app.put('/ingredientes/:id', async (req, res) => {
             factorConversion
         } = req.body
 
-        costo = Number(costo)
+        costo = req.body.costo != null ? Number(req.body.costo) : null
         factorConversion = Number(factorConversion)
 
-        if(costo <= 0 || factorConversion <= 0){
-            return res.status(400).json({error:"Valores inválidos"})
+        if (factorConversion <= 0) {
+            return res.status(400).json({ error: "Valores inválidos" })
+        }
+        if (costo !== null && costo <= 0) {
+            return res.status(400).json({ error: "Valores inválidos" })
+        }
+
+        // 🔥 VALIDAR SI ESTÁ EN USO
+        const [rows] = await db.query(`
+            SELECT COUNT(*) as total 
+            FROM recetaingrediente 
+            WHERE ingredienteId = ?
+        `, [id])
+
+        if (rows[0].total > 0) {
+            return res.status(400).json({
+                error: "No se puede editar: está en uso en recetas"
+            })
         }
 
         await db.query(`
             UPDATE ingrediente 
             SET nombre=?, unidadCompraId=?, unidadRecetaId=?, costo=?, factorConversion=?
             WHERE id=?
-        `,[
+        `, [
             nombre,
             unidadCompraId,
             unidadRecetaId,
@@ -380,13 +374,30 @@ app.put('/ingredientes/:id', async (req, res) => {
 
         res.json({ message: "Ingrediente actualizado" })
 
-    }catch(error){
+    } catch (error) {
         console.error(error)
-        res.status(500).json({error:"Error al actualizar"})
+        res.status(500).json({ error: "Error al actualizar" })
     }
 })
+app.get('/ingredientes/:id/en-uso', async (req, res) => {
+    const { id } = req.params;
 
+    try {
+        const [rows] = await db.query(`
+            SELECT COUNT(*) as total
+            FROM recetaingrediente
+            WHERE ingredienteId = ?
+        `, [id]);
 
+        res.json({
+            enUso: rows[0].total > 0
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error al verificar uso" });
+    }
+});
 // --------------------
 // STOCK MATERIA PRIMA
 // --------------------
@@ -813,7 +824,14 @@ app.get('/recetas/produccion/:id', async (req, res) => {
     }
 });
 
-
+app.delete('/receta-ingrediente/receta/:recetaId', async (req, res) => {
+    const { recetaId } = req.params
+    await db.query(`
+        DELETE FROM recetaingrediente
+        WHERE recetaId = ?
+    `, [recetaId])
+    res.json({ message: "Ingredientes eliminados" })
+})
 // --------------------
 // CREAR RECETA
 // --------------------
@@ -914,10 +932,10 @@ app.delete('/receta-ingrediente/:id', async (req,res)=>{
 
     await db.query(`
         DELETE FROM recetaingrediente
-        WHERE recetaId=?
+        WHERE id = ?
     `,[id])
 
-    res.json({message:"ok"})
+    res.json({message:"Ingrediente eliminado"})
 })
 
 app.delete('/recetas/:id', async (req, res) => {
@@ -1926,7 +1944,6 @@ app.get('/ventas', async (req,res)=>{
 
 })
 
-
 // --------------------
 // login
 
@@ -1974,8 +1991,8 @@ app.post('/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("ERROR LOGIN:", error);
-        res.status(500).json({ error: error.message });
+        console.error(error);
+        res.status(500).json({ error: "Error en login" });
     }
 });
 
@@ -2130,6 +2147,7 @@ app.get('/compra', async(req,res)=>{
         })
     }
 })
+
 // START SERVER
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
