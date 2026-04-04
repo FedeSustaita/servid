@@ -23,6 +23,7 @@ const db = mysql.createPool({
   connectionLimit: 10
 });
 
+
 app.get('/', (req,res)=>{
     res.send('Hola Mundo');
 });
@@ -104,7 +105,20 @@ app.put('/deposito/desactivar', async (req, res) => {
         if (!id) {
             return res.status(400).json({ error: "ID no enviado" });
         }
+        const [stockMP] = await db.query(
+            "SELECT COUNT(*) as total FROM stockmateriaprima WHERE depositoId = ? AND cantidad > 0",
+            [id]
+        )
+        const [stockProd] = await db.query(
+            "SELECT COUNT(*) as total FROM stockproducto WHERE depositoId = ? AND cantidad > 0",
+            [id]
+        )
 
+        if (stockMP[0].total > 0 || stockProd[0].total > 0) {
+            return res.status(400).json({ 
+                error: "No se puede desactivar: el depósito tiene stock" 
+            })
+        }
         const [result] = await db.query(
             "UPDATE deposito SET esActivo = false WHERE id = ?",
             [id]
@@ -414,7 +428,8 @@ app.get('/stock-materia-prima', async (req,res)=>{
                 d.denominacion AS deposito,
                 SUM(s.cantidad) AS cantidad,
                 i.factorConversion,
-                um.abreviatura
+                um.abreviatura,
+                s.fechavencimiento
             FROM stockmateriaprima s
 
             JOIN ingrediente i 
@@ -660,57 +675,62 @@ app.get('/recetas/:id', async (req, res) => {
             return res.status(400).json({ error: "Faltan parámetros: id o depositoId" });
         }
 
-        const [rows] = await db.query(`
-            SELECT 
-                ri.id AS filaId,
-                CASE 
-                    WHEN ri.recetaRefId IS NOT NULL THEN 'receta'
-                    ELSE 'ingrediente'
-                END AS tipo,
-                CASE 
-                    WHEN ri.recetaRefId IS NOT NULL THEN re.nombre
-                    ELSE i.nombre
-                END AS ingrediente,
-                ri.cantidad,
-                IFNULL(SUM(smp.cantidad), 0) AS stockReceta,
-                i.factorConversion,
-                uc.abreviatura AS unidadCompraAbrev,
-                ur.abreviatura AS unidadRecetaAbrev,
-                -- Traemos los lotes como un string plano separado por pipes
-                (
-                    SELECT GROUP_CONCAT(CONCAT(sp.id, '|', sp.lote, '|', sp.cantidad) SEPARATOR '|||')
-                    FROM stockproducto sp
-                    WHERE sp.productoId IN (
-                        SELECT pt.id 
-                        FROM productoterminado pt
-                        WHERE pt.recetaId = ri.recetaRefId
-                    )
-                    AND sp.depositoId = ?
-                    AND sp.cantidad > 0
-                ) AS lotes_string
-            FROM recetaingrediente ri
-            LEFT JOIN ingrediente i ON ri.ingredienteId = i.id
-            LEFT JOIN unidadmedida uc ON i.unidadCompraId = uc.id
-            LEFT JOIN unidadmedida ur ON i.unidadRecetaId = ur.id
-            LEFT JOIN stockmateriaprima smp ON i.id = smp.ingredienteId AND smp.depositoId = ?
-            LEFT JOIN receta re ON ri.recetaRefId = re.id
-            WHERE ri.recetaId = ?
-            -- Agrupamos por todas las columnas seleccionadas (estándar SQL estricto)
-            GROUP BY 
-                ri.id, tipo, ingrediente, ri.cantidad, 
-                i.factorConversion, uc.abreviatura, ur.abreviatura, lotes_string
-        `, [depositoId, depositoId, id]);
+const [rows] = await db.query(`
+    SELECT 
+        ri.id AS filaId,
+        CASE 
+            WHEN ri.recetaRefId IS NOT NULL THEN 'receta'
+            ELSE 'ingrediente'
+        END AS tipo,
+        CASE 
+            WHEN ri.recetaRefId IS NOT NULL THEN re.nombre
+            ELSE i.nombre
+        END AS ingrediente,
+        ri.cantidad,
+        IFNULL(SUM(smp.cantidad), 0) AS stockReceta,
+        i.factorConversion,
+        uc.abreviatura AS unidadCompraAbrev,
+        ur.abreviatura AS unidadRecetaAbrev,
+        (
+            SELECT GROUP_CONCAT(
+                CONCAT(sp.id, '|', sp.lote, '|', sp.cantidad, '|', IFNULL(pr.fechaVencimiento, ''))
+                SEPARATOR '|||'
+            )
+            FROM stockproducto sp
+            LEFT JOIN produccionregistro pr
+                ON sp.lote = pr.numeroLote
+                AND pr.recetaId = ri.recetaRefId
+            WHERE sp.productoId IN (
+                SELECT pt.id 
+                FROM productoterminado pt
+                WHERE pt.recetaId = ri.recetaRefId
+            )
+            AND sp.depositoId = ?
+            AND sp.cantidad > 0
+        ) AS lotes_string
+    FROM recetaingrediente ri
+    LEFT JOIN ingrediente i ON ri.ingredienteId = i.id
+    LEFT JOIN unidadmedida uc ON i.unidadCompraId = uc.id
+    LEFT JOIN unidadmedida ur ON i.unidadRecetaId = ur.id
+    LEFT JOIN stockmateriaprima smp ON i.id = smp.ingredienteId AND smp.depositoId = ?
+    LEFT JOIN receta re ON ri.recetaRefId = re.id
+    WHERE ri.recetaId = ?
+    GROUP BY 
+        ri.id, tipo, ingrediente, ri.cantidad, 
+        i.factorConversion, uc.abreviatura, ur.abreviatura
+`, [depositoId, depositoId, id]);
 
         // Transformamos el string de lotes en un array de objetos real
         const parsedRows = rows.map(r => {
             let lotesArray = [];
             if (r.lotes_string) {
                 lotesArray = r.lotes_string.split('|||').map(item => {
-                    const [idLote, lote, cant] = item.split('|');
+                    const [idLote, lote, cant, fechaVenc] = item.split('|');
                     return {
                         idLote: Number(idLote),
                         lote,
-                        cantidad: Number(cant)
+                        cantidad: Number(cant),
+                        fechaVencimiento: fechaVenc || null
                     };
                 });
             }
@@ -1060,42 +1080,39 @@ app.post('/produccion', async (req, res) => {
             const totalNecesario = item.cantidad * lotes;
 
             // Si es una sub-receta (receta que se usa como ingrediente)
-            if (item.recetaRefId) {
-                // Buscamos en el objeto usando el nombre que el frontend envió como clave
-                const loteInfo = lotesSeleccionados[item.ingredienteNombre];
+if (item.recetaRefId) {
+    const loteInfo = lotesSeleccionados[item.ingredienteNombre];
 
-                if (!loteInfo) {
-                    throw new Error(`Falta seleccionar lote para: ${item.ingredienteNombre}`);
-                }
+    if (!loteInfo || !Array.isArray(loteInfo) || loteInfo.length === 0) {
+        throw new Error(`Falta seleccionar lote para: ${item.ingredienteNombre}`);
+    }
 
-                // 🔹 Buscamos el stock real de ese lote específico
-                const [stockExistente] = await connection.query(`
-                    SELECT sp.id, sp.cantidad
-                    FROM stockproducto sp
-                    INNER JOIN productoterminado pt ON sp.productoId = pt.id
-                    WHERE pt.recetaId = ? 
-                    AND sp.lote = ? 
-                    AND sp.depositoId = ?
-                    LIMIT 1
-                `, [item.recetaRefId, loteInfo.lote, depositoOrigenId]);
+    // ✅ Iterar cada lote seleccionado
+    for (const { lote, cantidad } of loteInfo) {
+        const [stockExistente] = await connection.query(`
+            SELECT sp.id, sp.cantidad
+            FROM stockproducto sp
+            INNER JOIN productoterminado pt ON sp.productoId = pt.id
+            WHERE pt.recetaId = ? 
+            AND sp.lote = ? 
+            AND sp.depositoId = ?
+            LIMIT 1
+        `, [item.recetaRefId, lote, depositoOrigenId]);
 
-                if (stockExistente.length === 0) {
-                    throw new Error(`No hay stock del lote ${loteInfo.lote} para ${item.ingredienteNombre} en el depósito seleccionado`);
-                }
+        if (stockExistente.length === 0) {
+            throw new Error(`No hay stock del lote ${lote} para ${item.ingredienteNombre}`);
+        }
 
-                const stockItem = stockExistente[0];
-                const cantidadARestar =totalNecesario / (item.factorConversion ?? 1)
+        if (stockExistente[0].cantidad < cantidad) {
+            throw new Error(`Stock insuficiente en lote ${lote} de ${item.ingredienteNombre}. Disponible: ${stockExistente[0].cantidad}, Querés usar: ${cantidad}`);
+        }
 
-                if (stockItem.cantidad < cantidadARestar) {
-                    throw new Error(`Stock insuficiente de ${item.ingredienteNombre}. Necesario: ${cantidadARestar}, Disponible: ${stockItem.cantidad}`);
-                }
-
-                // 🔹 Descontar
-                await connection.query(
-                    "UPDATE stockproducto SET cantidad = cantidad - ? WHERE id = ?",
-                    [cantidadARestar, stockItem.id]
-                );
-            }
+        await connection.query(
+            "UPDATE stockproducto SET cantidad = cantidad - ? WHERE id = ?",
+            [cantidad, stockExistente[0].id]
+        );
+    }
+}
             if (item.ingredienteId) {
                 const cantidadARestar =
                     totalNecesario / (item.factorConversion ?? 1)
@@ -2036,7 +2053,7 @@ app.post('/compras_detalle', async (req, res) => {
         // 2. Actualizar stock (POR DEPÓSITO 🔥)
         await db.query(`
             INSERT INTO stockmateriaprima (ingredienteId, depositoId, cantidad)
-            VALUES (?, ?, ?)
+            VALUES (?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE 
             cantidad = cantidad + VALUES(cantidad)
         `, [ingredienteId, depositoId, cantidad])
@@ -2147,6 +2164,8 @@ app.get('/compra', async(req,res)=>{
         })
     }
 })
+
+
 
 // START SERVER
 app.listen(PORT, () => {
