@@ -23,7 +23,6 @@ const db = mysql.createPool({
   connectionLimit: 10
 });
 
-
 app.get('/', (req,res)=>{
     res.send('Hola Mundo');
 });
@@ -677,6 +676,7 @@ app.get('/recetas/:id', async (req, res) => {
 
 const [rows] = await db.query(`
     SELECT 
+        ri.ingredienteId,
         ri.id AS filaId,
         CASE 
             WHEN ri.recetaRefId IS NOT NULL THEN 'receta'
@@ -716,8 +716,14 @@ const [rows] = await db.query(`
     LEFT JOIN receta re ON ri.recetaRefId = re.id
     WHERE ri.recetaId = ?
     GROUP BY 
-        ri.id, tipo, ingrediente, ri.cantidad, 
-        i.factorConversion, uc.abreviatura, ur.abreviatura
+        ri.id,
+        ri.ingredienteId,
+        CASE WHEN ri.recetaRefId IS NOT NULL THEN 'receta' ELSE 'ingrediente' END,
+        CASE WHEN ri.recetaRefId IS NOT NULL THEN re.nombre ELSE i.nombre END,
+        ri.cantidad,
+        i.factorConversion,
+        uc.abreviatura,
+        ur.abreviatura
 `, [depositoId, depositoId, id]);
 
         // Transformamos el string de lotes en un array de objetos real
@@ -1841,6 +1847,9 @@ app.get('/productos-catalogo', async (req, res) => {
 app.post('/ventas/nueva', async (req,res)=>{
 
     const { depositoId, productos, total } = req.body
+        console.log("📦 VENTA RECIBIDA:")
+    console.log("depositoId:", depositoId)
+    console.log("productos:", JSON.stringify(productos, null, 2))
     const connection = await db.getConnection()
     try{
         await connection.beginTransaction()
@@ -1873,7 +1882,7 @@ app.post('/ventas/nueva', async (req,res)=>{
                 p.cantidad,
                 p.productoId,
                 p.lote,
-                depositoId
+                p.depositoId
             ])
         }
 
@@ -2053,7 +2062,7 @@ app.post('/compras_detalle', async (req, res) => {
         // 2. Actualizar stock (POR DEPÓSITO 🔥)
         await db.query(`
             INSERT INTO stockmateriaprima (ingredienteId, depositoId, cantidad)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE 
             cantidad = cantidad + VALUES(cantidad)
         `, [ingredienteId, depositoId, cantidad])
@@ -2145,7 +2154,8 @@ app.get('/compra', async(req,res)=>{
             c.fecha,
             i.nombre,
             d.denominacion AS nombre_deposito,
-            cd.deposito_id
+            cd.deposito_id,
+            um.abreviatura AS unidad_compra_abrev
 
             FROM compras_detalle cd
             LEFT JOIN compras c
@@ -2155,6 +2165,8 @@ app.get('/compra', async(req,res)=>{
             on cd.ingrediente_id = i.id
             LEFT JOIN deposito d
             ON cd.deposito_id = d.id
+            LEFT JOIN unidadmedida um
+            ON i.unidadCompraId = um.id
         `)
             res.json(rows)
     } catch (error) {
@@ -2164,6 +2176,72 @@ app.get('/compra', async(req,res)=>{
         })
     }
 })
+
+app.get('/movimiento', async(req,res)=>{
+
+    try {
+        const [rows]= await db.query(`
+        SELECT 
+            m.id, 
+            m.accion, 
+            m.cantidad, 
+            m.fecha, 
+            d.denominacion AS deposito, 
+
+            r.nombre AS producto, 
+            i.nombre AS ingrediente,
+
+            c.abreviatura AS unidad_mp,
+            c2.abreviatura AS unidad_prod
+
+        FROM movimientos m
+
+        JOIN deposito d ON m.depositoId = d.id
+
+        LEFT JOIN ingrediente i ON m.materiaprimaId = i.id
+        LEFT JOIN unidadmedida c ON i.unidadRecetaId = c.id
+
+        LEFT JOIN receta r ON m.producto = r.id
+        LEFT JOIN unidadmedida c2 ON r.unidadRindeId = c2.id
+        `)
+            res.json(rows)
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ error: "Error al buscar movimiento" })
+    }
+})
+app.post('/movimiento', async (req, res) => {
+    try {
+        const { accion, producto, materiaprimaId, cantidad, fecha, depositoId } = req.body;
+
+        if (!accion || !cantidad || !fecha || !depositoId) {
+            return res.status(400).json({ error: "Faltan datos" });
+        }
+
+        if (!producto && !materiaprimaId) {
+            return res.status(400).json({ error: "Debe enviar producto o materiaprimaId" });
+        }
+
+        const [result] = await db.query(`
+            INSERT INTO movimientos (accion, producto, materiaprimaId, cantidad, fecha, depositoId)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+            accion,
+            producto || null,
+            materiaprimaId || null,
+            cantidad,
+            fecha,
+            depositoId|| null
+        ]);
+
+        res.json({ message: "Movimiento creado", id: result.insertId });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error al crear movimiento" });
+    }
+});
+
 
 
 
